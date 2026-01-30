@@ -234,7 +234,8 @@ def generate_docker_compose(scenario: dict[str, Any]) -> str:
     all_services = ["green-agent"] + participant_names
 
     # Get mock image from env var or use default
-    mock_image = os.environ.get("MOCK_IMAGE", "ghcr.io/yonghongzhang-io/green-comtrade-bench-v2-mock:latest")
+    # Get mock image from env var or use default
+    mock_image = os.environ.get("MOCK_IMAGE", "ghcr.io/yongxie-icmm/green-comtrade-bench-enhanced-mock:latest")
 
     return COMPOSE_TEMPLATE.format(
         mock_image=mock_image,
