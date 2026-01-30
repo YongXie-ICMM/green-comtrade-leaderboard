@@ -2,6 +2,16 @@ name: Run Scenario
 
 on:
   workflow_dispatch:
+    inputs:
+      purple_image:
+        description: 'Purple Agent Image to test'
+        required: true
+        default: 'ghcr.io/yongxie-icmm/purple-agent-v1:latest'
+        type: choice
+        options:
+          - 'ghcr.io/yongxie-icmm/purple-agent-v1:latest'
+          - 'ghcr.io/yongxie-icmm/purple-agent-v2:latest'
+          - 'ghcr.io/yongxie-icmm/purple-agent-v3:latest'
   push:
     paths:
       - 'scenario.ci.toml'
@@ -14,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GREEN_IMAGE: ghcr.io/yongxie-icmm/green-comtrade-bench-enhanced:latest
-      PURPLE_IMAGE: ghcr.io/yongxie-icmm/purple-agent-v1:latest
+      PURPLE_IMAGE: ${{ inputs.purple_image || 'ghcr.io/yongxie-icmm/purple-agent-v1:latest' }}
       MOCK_IMAGE: ghcr.io/yongxie-icmm/green-comtrade-bench-enhanced-mock:latest
     if: github.event.repository.fork == true || github.ref == 'refs/heads/main'
     permissions:
