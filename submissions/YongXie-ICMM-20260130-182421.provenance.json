@@ -1,0 +1,18 @@
+{
+  "image_digests": {
+    "mock-comtrade": "ghcr.io/yongxie-icmm/green-comtrade-bench-enhanced-mock@sha256:d5b4a45f5c193f31fe0fb8147aaea046cb6ab4a3db7908f37a0351dbbd48b0ec",
+    "green-agent": "ghcr.io/yongxie-icmm/green-comtrade-bench-enhanced@sha256:4c15644800f852dba77e8f1a213254427134aba0eb9467c08aff868630d16fbd",
+    "purple-comtrade-baseline-v2": "ghcr.io/yongxie-icmm/purple-agent-v1@sha256:af5bfed4e0830779a88aa516bfa26d6e3005fe58ec8ea12d89d6516febfbc036",
+    "agentbeats-client": "ghcr.io/agentbeats/agentbeats-client@sha256:13dfe3ef4e583a80e7ce2fe3becd0ce3b879841368a7f4fa40b6ebbabeeb014e"
+  },
+  "timestamp": "2026-01-30T18:24:21Z",
+  "github_actions": {
+    "run_url": "https://github.com/YongXie-ICMM/green-comtrade-leaderboard/actions/runs/21526210211",
+    "run_logs_url": "https://api.github.com/repos/YongXie-ICMM/green-comtrade-leaderboard/actions/runs/21526210211/logs",
+    "ref": "refs/heads/main",
+    "sha": "1579a5ac2fd28f2704f1cfa065f29d1158496251",
+    "repository_url": "https://github.com/YongXie-ICMM/green-comtrade-leaderboard",
+    "workflow_ref": "YongXie-ICMM/green-comtrade-leaderboard/.github/workflows/run-scenario.yml@refs/heads/main",
+    "workflow_sha": "1579a5ac2fd28f2704f1cfa065f29d1158496251"
+  }
+}
