@@ -1,0 +1,221 @@
+name: Run Scenario
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'scenario.ci.toml'
+      - '.github/workflows/run-scenario.yml'
+      - 'generate_compose.py'
+      - 'record_provenance.py'
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    env:
+      GREEN_IMAGE: ghcr.io/yonghongzhang-io/green-comtrade-bench-v2:1a7cb5c1e3797dc5fe0de9740cd3e23b5d881454
+      PURPLE_IMAGE: ghcr.io/yonghongzhang-io/purple-comtrade-baseline-v2:e76fe350feff7e7347b9d81950141d893e5c92af
+      MOCK_IMAGE: ghcr.io/yonghongzhang-io/green-comtrade-bench-v2-mock:1a7cb5c1e3797dc5fe0de9740cd3e23b5d881454
+    if: github.event.repository.fork == true || github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+      packages: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install tomli tomli-w pyyaml requests
+
+      - name: Generate docker-compose.yml
+        run: python generate_compose.py --scenario scenario.ci.toml
+
+      - name: Debug agentbeats-client config
+        run: |
+          python - <<'PY'
+          import yaml
+          with open("docker-compose.yml") as f:
+              data = yaml.safe_load(f)
+          svc = data.get("services", {}).get("agentbeats-client", {})
+          print("=== agentbeats-client service config ===")
+          print(f"image: {svc.get('image')}")
+          print(f"entrypoint: {svc.get('entrypoint')}")
+          print(f"command: {svc.get('command')}")
+          PY
+
+      - name: Patch docker-compose for agentbeats-client
+        run: |
+          python - <<'PY'
+          import yaml
+
+          path = "docker-compose.yml"
+          with open(path, "r", encoding="utf-8") as f:
+              data = yaml.safe_load(f)
+
+          services = (data or {}).get("services", {})
+          svc = services.get("agentbeats-client")
+
+          if not svc:
+              raise SystemExit("agentbeats-client service not found in docker-compose.yml")
+
+          # Remove any entrypoint override - let the image use its default ENTRYPOINT
+          svc.pop("entrypoint", None)
+
+          # Set command to use container paths
+          svc["command"] = ["/app/scenario.toml", "/app/output/results.json"]
+
+          with open(path, "w", encoding="utf-8") as f:
+              yaml.safe_dump(data, f, sort_keys=False)
+
+          print("Patched docker-compose.yml:")
+          print("  entrypoint: (removed, using image default)")
+          print("  command: ['/app/scenario.toml', '/app/output/results.json']")
+          print()
+          print("===== agentbeats-client section =====")
+          print(yaml.safe_dump({"agentbeats-client": svc}, sort_keys=False))
+          PY
+
+      - name: Debug docker-compose.yml
+        run: |
+          echo "===== docker-compose.yml (after patch) ====="
+          cat docker-compose.yml
+          echo "==========================================="
+
+      - name: Check GHCR_TOKEN is set
+        run: |
+          if [ -z "${{ secrets.GHCR_TOKEN }}" ]; then
+            echo "GHCR_TOKEN is missing. Add a repo secret GHCR_TOKEN with a PAT that has read:packages."
+            exit 1
+          fi
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GHCR_TOKEN }}
+
+      - name: Pull images
+        run: |
+          if ! docker compose pull; then
+            echo ""
+            echo "Error: Failed to pull one or more images."
+            echo "Ensure all images are publicly accessible."
+            echo "For ghcr.io images, check package settings at:"
+            echo "  https://github.com/orgs/YOUR_ORG/packages or"
+            echo "  https://github.com/users/YOUR_USER/packages"
+            exit 1
+          fi
+
+      - name: Debug image digests
+        run: |
+          echo "===== Pulled images ====="
+          docker images --digests | grep -E "green-comtrade-bench-v2|purple-comtrade-baseline-v2" || true
+          echo ""
+          echo "GREEN_IMAGE=$GREEN_IMAGE"
+          docker inspect --format='{{index .RepoDigests 0}}' "$GREEN_IMAGE" 2>/dev/null || echo "(not found)"
+          echo ""
+          echo "PURPLE_IMAGE=$PURPLE_IMAGE"
+          docker inspect --format='{{index .RepoDigests 0}}' "$PURPLE_IMAGE" 2>/dev/null || echo "(not found)"
+
+      - name: Create output directory
+        run: mkdir -p output && chmod 777 output
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Export secrets as environment variables
+        env:
+          SECRETS_JSON: ${{ toJSON(secrets) }}
+        run: |
+          echo "$SECRETS_JSON" | jq -r 'to_entries|map("\(.key)=\(.value)")|.[]' > .env
+
+      - name: Debug agent cards
+        run: |
+          echo "===== Starting agent services for health check ====="
+          docker compose up -d green-agent purple-comtrade-baseline-v2
+          echo "Waiting for agents to be healthy (max 90s)..."
+          timeout 90 bash -c 'until docker compose ps | grep -E "(green-agent|purple-comtrade-baseline-v2)" | grep -q "(healthy)"; do sleep 2; done' || true
+          echo ""
+          echo "===== Container Status ====="
+          docker compose ps -a
+          echo ""
+          echo "===== Purple Agent Logs ====="
+          docker compose logs purple-comtrade-baseline-v2 2>&1 | tail -100 || echo "(no logs)"
+          echo ""
+          echo "===== Green Agent Logs ====="
+          docker compose logs green-agent 2>&1 | tail -50 || echo "(no logs)"
+          echo ""
+          echo "===== Green Agent Card ====="
+          docker compose exec -T green-agent curl -f http://localhost:9009/.well-known/agent-card.json | jq . || echo "FAILED"
+          echo ""
+          echo "===== Purple Agent Card ====="
+          docker compose exec -T purple-comtrade-baseline-v2 curl -f http://localhost:9009/.well-known/agent-card.json | jq . || echo "FAILED"
+          echo ""
+          echo "===== Stopping debug containers ====="
+          docker compose down
+          echo ""
+
+      - name: Run assessment
+        run: docker compose up --timestamps --no-color --exit-code-from agentbeats-client --abort-on-container-exit
+
+      - name: Record provenance
+        run: python record_provenance.py --compose docker-compose.yml --output output/provenance.json
+
+      - name: Generate submission metadata
+        id: metadata
+        run: |
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          USERNAME=${{ github.repository_owner }}
+          UNIQUE_NAME="${USERNAME}-${TIMESTAMP}"
+          echo "unique_name=$UNIQUE_NAME" >> $GITHUB_OUTPUT
+          echo "branch_name=submission-${UNIQUE_NAME}" >> $GITHUB_OUTPUT
+
+      - name: Copy files to submission directory
+        run: |
+          cp scenario.ci.toml submissions/${{ steps.metadata.outputs.unique_name }}.toml
+          cp output/results.json results/${{ steps.metadata.outputs.unique_name }}.json
+          cp output/provenance.json submissions/${{ steps.metadata.outputs.unique_name }}.provenance.json
+
+      - name: Determine target repository
+        id: target
+        env:
+            GH_TOKEN: ${{ github.token }}
+        run: |
+            PARENT_REPO=$(gh api repos/${{ github.repository }} --jq '.parent.full_name // "${{ github.repository }}"')
+            echo "Target repository: $PARENT_REPO"
+            echo "repo=$PARENT_REPO" >> $GITHUB_OUTPUT
+
+      - name: Create submission branch
+        run: |
+          git remote add upstream https://github.com/${{ steps.target.outputs.repo }}.git
+          git fetch upstream
+          git checkout -b ${{ steps.metadata.outputs.branch_name }} upstream/main
+
+      - name: Commit results
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add submissions/${{ steps.metadata.outputs.unique_name }}.toml submissions/${{ steps.metadata.outputs.unique_name }}.provenance.json results/${{ steps.metadata.outputs.unique_name }}.json
+          git commit -m "Submission: ${{ steps.metadata.outputs.unique_name }}
+
+          Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          git push origin ${{ steps.metadata.outputs.branch_name }}
+          echo "::notice title=Submission Branch Created::Your results are ready for submission on branch: ${{ steps.metadata.outputs.branch_name }}"
+
+      - name: Output PR link
+        run: |
+          echo "### Submit your results" >> $GITHUB_STEP_SUMMARY
+          echo "[Click here to open a pull request](https://github.com/${{ steps.target.outputs.repo }}/compare/main...${{ github.repository_owner }}:${{ github.event.repository.name }}:${{ steps.metadata.outputs.branch_name }}?expand=1)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "⚠️ When creating the PR, UNCHECK 'Allow edits and access to secrets by maintainers' to protect your secrets." >> $GITHUB_STEP_SUMMARY
+
+      - name: Cleanup
+        if: always()
+        run: docker compose down -v || true

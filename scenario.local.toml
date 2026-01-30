@@ -1,0 +1,20 @@
+# Local testing scenario - uses image for green agent (faster, no API call)
+
+[green_agent]
+image = "ghcr.io/yonghongzhang-io/green-comtrade-bench-v2:latest"
+
+[[participants]]
+agentbeats_id = "019bd217-12bc-7ba0-9ef6-44370aba46a2"
+name = "purple-comtrade-baseline-v2"
+env = {}
+
+[config]
+tasks = [
+  "T1_single_page",
+  "T2_multi_page",
+  "T3_duplicates",
+  "T4_rate_limit_429",
+  "T5_server_error_500",
+  "T6_page_drift",
+  "T7_totals_trap"
+]
